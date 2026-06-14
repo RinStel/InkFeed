@@ -1,5 +1,6 @@
 package dev.rinstel.inkfeed
 
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -22,14 +23,12 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.rinstel.inkfeed.article.cache.CacheCleaner
-import dev.rinstel.inkfeed.article.cache.CacheCleanupWorker
 import dev.rinstel.inkfeed.core.database.InkFeedDatabase
 import dev.rinstel.inkfeed.core.model.Article
 import dev.rinstel.inkfeed.core.model.ImagePolicy
@@ -41,7 +40,7 @@ import dev.rinstel.inkfeed.feed.opml.OpmlImporter
 import dev.rinstel.inkfeed.feed.sync.FeedSyncService
 import java.util.concurrent.Executors
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
     private lateinit var database: InkFeedDatabase
     private lateinit var settings: AppSettings
     private lateinit var syncService: FeedSyncService
@@ -86,23 +85,78 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowCompat.getInsetsController(window, window.decorView)
-            .show(WindowInsetsCompat.Type.systemBars())
-        database = InkFeedDatabase(this)
-        settings = AppSettings(this)
-        syncService = FeedSyncService(this, database, settings)
-        epubBuilder = EpubBuilder(this, settings, database)
-        cacheCleaner = CacheCleaner(database)
-        CacheCleanupWorker.schedule(this)
-        setContentView(buildRoot())
-        showToday()
+        var stage = "window"
+        try {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            WindowCompat.getInsetsController(window, window.decorView)
+                .show(WindowInsetsCompat.Type.systemBars())
+            stage = "database"
+            database = InkFeedDatabase(this)
+            database.readableDatabase
+            stage = "settings"
+            settings = AppSettings(this)
+            stage = "services"
+            syncService = FeedSyncService(this, database, settings)
+            epubBuilder = EpubBuilder(this, settings, database)
+            cacheCleaner = CacheCleaner(database)
+            stage = "layout"
+            setContentView(buildRoot())
+            stage = "today"
+            showToday()
+            scheduleCacheCleanupIfNeeded()
+        } catch (error: Throwable) {
+            val path = CrashReporter.write(this, stage, error)
+            showStartupError(stage, path, error)
+        }
     }
 
     override fun onDestroy() {
-        syncService.cancel()
+        if (::syncService.isInitialized) syncService.cancel()
         executor.shutdownNow()
         super.onDestroy()
+    }
+
+    private fun scheduleCacheCleanupIfNeeded() {
+        val lastCleanup = settings.lastCacheCleanupAt
+        val dayStart = BeijingTime.startOfDayMillis()
+        if (lastCleanup >= dayStart) return
+        executor.execute {
+            runCatching { cacheCleaner.clean(settings.cacheDays) }
+                .onSuccess { settings.lastCacheCleanupAt = System.currentTimeMillis() }
+                .onFailure { Log.e(TAG, "Unable to clean cache", it) }
+        }
+    }
+
+    private fun showStartupError(stage: String, path: String, error: Throwable) {
+        val details = CrashReporter.stackTrace(error)
+            .lineSequence()
+            .take(18)
+            .joinToString("\n")
+        val message = """
+            InkFeed 启动失败
+
+            阶段：$stage
+            系统：Android ${android.os.Build.VERSION.RELEASE}（API ${android.os.Build.VERSION.SDK_INT}）
+            设备：${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}
+            错误：${error.javaClass.simpleName}: ${error.message.orEmpty()}
+
+            日志文件：
+            $path
+
+            请拍摄此页面，或在文件管理器中找到 crash-latest.txt。
+
+            $details
+        """.trimIndent()
+        setContentView(ScrollView(this).apply {
+            setBackgroundColor(Color.WHITE)
+            addView(TextView(this@MainActivity).apply {
+                text = message
+                textSize = 14f
+                setTextColor(Color.BLACK)
+                setTextIsSelectable(true)
+                setPadding(dp(20), dp(20), dp(20), dp(20))
+            })
+        })
     }
 
     private fun buildRoot(): View {

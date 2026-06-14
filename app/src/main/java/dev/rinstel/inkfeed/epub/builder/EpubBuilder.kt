@@ -14,8 +14,6 @@ import java.io.OutputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
-import java.time.Instant
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
@@ -294,7 +292,7 @@ internal object EpubArchive {
                 <dc:title>${xml(title)}</dc:title>
                 <dc:language>zh-CN</dc:language>
                 <dc:creator>InkFeed</dc:creator>
-                <meta property="dcterms:modified">${DateTimeFormatter.ISO_INSTANT.format(Instant.now())}</meta>
+                <meta property="dcterms:modified">${BeijingTime.isoInstant(System.currentTimeMillis())}</meta>
               </metadata>
               <manifest>$manifest</manifest>
               <spine>$spine</spine>

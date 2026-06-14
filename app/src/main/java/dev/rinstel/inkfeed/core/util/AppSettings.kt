@@ -48,4 +48,8 @@ class AppSettings(context: Context) {
     var lastStarredPath: String?
         get() = preferences.getString("last_starred_path", null)
         set(value) = preferences.edit().putString("last_starred_path", value).apply()
+
+    var lastCacheCleanupAt: Long
+        get() = preferences.getLong("last_cache_cleanup_at", 0L)
+        set(value) = preferences.edit().putLong("last_cache_cleanup_at", value).apply()
 }

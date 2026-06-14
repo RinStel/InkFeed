@@ -2,14 +2,14 @@ package dev.rinstel.inkfeed.feed.parser
 
 import dev.rinstel.inkfeed.core.model.FeedItem
 import org.jsoup.Jsoup
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import org.jsoup.nodes.Element
+import org.jsoup.parser.Parser
+import org.jsoup.select.Elements
 import java.io.InputStream
-import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class ParsedFeed(
     val title: String?,
@@ -19,163 +19,113 @@ data class ParsedFeed(
 
 object FeedParser {
     fun parse(input: InputStream): ParsedFeed {
-        val parser = XmlPullParserFactory.newInstance().newPullParser().apply {
-            setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
-            setInput(input, null)
+        val document = Jsoup.parse(input, "UTF-8", "", Parser.xmlParser())
+
+        val rssChannel = document.selectFirst("rss > channel")
+        if (rssChannel != null) {
+            return parseRssChannel(rssChannel)
         }
-        var feedTitle: String? = null
-        var siteUrl: String? = null
-        val items = mutableListOf<FeedItem>()
-        var event = parser.eventType
-        while (event != XmlPullParser.END_DOCUMENT) {
-            if (event == XmlPullParser.START_TAG) {
-                when (parser.name.lowercase()) {
-                    "channel" -> parseRssChannel(parser).also {
-                        feedTitle = it.title
-                        siteUrl = it.siteUrl
-                        items += it.items
-                    }
-                    "feed" -> parseAtomFeed(parser).also {
-                        feedTitle = it.title
-                        siteUrl = it.siteUrl
-                        items += it.items
-                    }
-                }
-            }
-            event = parser.next()
+        val atomFeed = document.selectFirst("feed")
+        if (atomFeed != null) {
+            return parseAtomFeed(atomFeed)
         }
-        return ParsedFeed(feedTitle, siteUrl, items)
+        return ParsedFeed(null, null, emptyList())
     }
 
-    private fun parseRssChannel(parser: XmlPullParser): ParsedFeed {
-        var title: String? = null
-        var siteUrl: String? = null
-        val items = mutableListOf<FeedItem>()
-        while (parser.next() != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG) {
-                when (parser.name.lowercase()) {
-                    "title" -> if (title == null) title = parser.nextText().trim()
-                    "link" -> if (siteUrl == null) siteUrl = parser.nextText().trim()
-                    "item" -> items += parseItem(parser, "item")
-                }
-            } else if (parser.eventType == XmlPullParser.END_TAG && parser.name.equals("channel", true)) {
-                break
-            }
+    private fun parseRssChannel(channel: Element): ParsedFeed {
+        val title = channel.selectFirst("channel > title")?.text()?.trim()
+            ?: channel.selectFirst("> title")?.text()?.trim()
+        val siteUrl = channel.selectFirst("channel > link")?.text()?.trim()
+            ?: channel.selectFirst("> link")?.text()?.trim()
+        val items = channel.select("item").map { element ->
+            parseRssItem(element)
         }
         return ParsedFeed(title, siteUrl, items)
     }
 
-    private fun parseAtomFeed(parser: XmlPullParser): ParsedFeed {
-        var title: String? = null
-        var siteUrl: String? = null
-        val items = mutableListOf<FeedItem>()
-        while (parser.next() != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG) {
-                when (parser.name.lowercase()) {
-                    "title" -> if (title == null) title = parser.nextText().trim()
-                    "link" -> {
-                        val href = parser.getAttributeValue(null, "href")
-                        val rel = parser.getAttributeValue(null, "rel")
-                        if (!href.isNullOrBlank() && (rel == null || rel == "alternate")) {
-                            siteUrl = href
-                        }
-                        skip(parser)
-                    }
-                    "entry" -> items += parseItem(parser, "entry")
-                }
-            } else if (parser.eventType == XmlPullParser.END_TAG && parser.name.equals("feed", true)) {
-                break
-            }
+    private fun parseAtomFeed(feed: Element): ParsedFeed {
+        val title = feed.selectFirst("feed > title")?.text()?.trim()
+            ?: feed.selectFirst("> title")?.text()?.trim()
+        val links = feed.select("link")
+        val siteUrl = links.firstOrNull { link ->
+            val rel = link.attr("rel")
+            rel.isBlank() || rel == "alternate"
+        }?.attr("href")?.takeIf { it.isNotBlank() }
+        val items = feed.select("entry").map { element ->
+            parseAtomEntry(element)
         }
         return ParsedFeed(title, siteUrl, items)
     }
 
-    private fun parseItem(parser: XmlPullParser, endTag: String): FeedItem {
-        var title = "无标题"
-        var url = ""
-        var guid: String? = null
-        var author: String? = null
-        var publishedAt: Long? = null
-        var summary: String? = null
-        while (parser.next() != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG) {
-                when (parser.name.lowercase()) {
-                    "title" -> title = clean(parser.nextText())
-                    "link" -> {
-                        val href = parser.getAttributeValue(null, "href")
-                        if (!href.isNullOrBlank()) {
-                            val rel = parser.getAttributeValue(null, "rel")
-                            if (rel == null || rel == "alternate") url = href
-                            skip(parser)
-                        } else {
-                            url = parser.nextText().trim()
-                        }
-                    }
-                    "guid", "id" -> guid = parser.nextText().trim()
-                    "author" -> author = parseAuthor(parser)
-                    "creator" -> author = clean(parser.nextText())
-                    "pubdate", "published", "updated", "date" ->
-                        publishedAt = parseDate(parser.nextText())
-                    "description", "summary", "encoded", "content" ->
-                        summary = clean(parser.nextText()).take(1000)
-                    else -> skip(parser)
-                }
-            } else if (parser.eventType == XmlPullParser.END_TAG && parser.name.equals(endTag, true)) {
-                break
-            }
-        }
-        if (url.isBlank()) url = guid.orEmpty()
-        return FeedItem(title, url, guid, author, publishedAt, summary)
+    private fun parseRssItem(item: Element): FeedItem {
+        val title = clean(item.selectFirst("title")?.text().orEmpty()).ifBlank { "无标题" }
+        val url = item.selectFirst("link")?.text()?.trim().orEmpty()
+        val guid = item.selectFirst("guid")?.text()?.trim()?.takeIf { it.isNotBlank() }
+        val author = item.selectFirst("author")?.text()?.trim()?.takeIf { it.isNotBlank() }
+            ?: item.selectFirst("creator")?.text()?.trim()?.takeIf { it.isNotBlank() }
+        val publishedAt = selectFirstText(item, "pubDate")
+            ?.let(::parseDate)
+        val summary = selectFirstText(item, "description")
+            ?: selectFirstText(item, "encoded")
+            ?: selectFirstText(item, "content:encoded")
+        return FeedItem(title, url.ifBlank { guid.orEmpty() }, guid, author, publishedAt, summary)
+    }
+
+    private fun parseAtomEntry(entry: Element): FeedItem {
+        val title = clean(entry.selectFirst("title")?.text().orEmpty()).ifBlank { "无标题" }
+        val links = entry.select("link")
+        val url = links.firstOrNull { link ->
+            val rel = link.attr("rel")
+            rel.isBlank() || rel == "alternate"
+        }?.attr("href")?.takeIf { it.isNotBlank() }.orEmpty()
+        val guid = entry.selectFirst("id")?.text()?.trim()?.takeIf { it.isNotBlank() }
+        val author = entry.selectFirst("author > name")?.text()?.trim()
+            ?.takeIf { it.isNotBlank() }
+        val publishedAt = selectFirstText(entry, "updated")?.let(::parseDate)
+            ?: selectFirstText(entry, "published")?.let(::parseDate)
+        val summary = selectFirstText(entry, "summary")
+            ?: selectFirstText(entry, "content")
+        return FeedItem(title, url.ifBlank { guid.orEmpty() }, guid, author, publishedAt, summary)
+    }
+
+    private fun selectFirstText(parent: Element, cssQuery: String): String? {
+        val element = parent.selectFirst(cssQuery) ?: return null
+        val type = element.attr("type").lowercase()
+        val text = element.text().trim()
+        return if (text.isBlank()) null else clean(text).take(1000)
     }
 
     private fun clean(value: String): String =
         Jsoup.parse(value).text().replace(Regex("\\s+"), " ").trim()
 
-    private fun parseAuthor(parser: XmlPullParser): String? {
-        var name: String? = null
-        var directText: String? = null
-        while (parser.next() != XmlPullParser.END_DOCUMENT) {
-            when (parser.eventType) {
-                XmlPullParser.START_TAG -> {
-                    if (parser.name.equals("name", true)) {
-                        name = clean(parser.nextText())
-                    } else {
-                        skip(parser)
-                    }
-                }
-                XmlPullParser.TEXT -> {
-                    parser.text?.trim()?.takeIf { it.isNotBlank() }?.let { directText = it }
-                }
-                XmlPullParser.END_TAG -> if (parser.name.equals("author", true)) break
-            }
-        }
-        return name ?: directText?.let(::clean)
-    }
-
     private fun parseDate(value: String): Long? {
         val text = value.trim()
-        val formatters = listOf(
-            DateTimeFormatter.RFC_1123_DATE_TIME,
-            DateTimeFormatter.ISO_OFFSET_DATE_TIME,
-            DateTimeFormatter.ISO_ZONED_DATE_TIME,
-            DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US),
-            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+        val patterns = arrayOf(
+            "EEE, dd MMM yyyy HH:mm:ss Z",
+            "EEE, dd MMM yyyy HH:mm Z",
+            "EEE, dd MMM yyyy HH:mm:ss z",
+            "EEE, dd MMM yyyy HH:mm z",
+            "yyyy-MM-dd'T'HH:mm:ssXXX",
+            "yyyy-MM-dd'T'HH:mm:ssX",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm'Z'",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd"
         )
-        return formatters.firstNotNullOfOrNull { formatter ->
-            runCatching { ZonedDateTime.parse(text, formatter).toInstant().toEpochMilli() }.getOrNull()
-                ?: runCatching { OffsetDateTime.parse(text, formatter).toInstant().toEpochMilli() }.getOrNull()
-                ?: runCatching { Instant.from(formatter.parse(text)).toEpochMilli() }.getOrNull()
+        for (pattern in patterns) {
+            val date = parseWithPattern(text, pattern) ?: continue
+            return date.time
         }
+        return null
     }
 
-    private fun skip(parser: XmlPullParser) {
-        if (parser.eventType != XmlPullParser.START_TAG) return
-        var depth = 1
-        while (depth != 0) {
-            when (parser.next()) {
-                XmlPullParser.START_TAG -> depth++
-                XmlPullParser.END_TAG -> depth--
+    private fun parseWithPattern(text: String, pattern: String): Date? = runCatching {
+        SimpleDateFormat(pattern, Locale.US).apply {
+            isLenient = true
+            if (!pattern.contains("X") && !pattern.contains("Z") && !pattern.contains("z")) {
+                timeZone = TimeZone.getTimeZone("UTC")
             }
-        }
-    }
+        }.parse(text)
+    }.getOrNull()
 }

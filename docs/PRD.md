@@ -19,20 +19,20 @@ Android 基础配置：
 ```kotlin
 android {
     namespace = "dev.rinstel.inkfeed"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "dev.rinstel.inkfeed"
-        minSdk = 30
-        targetSdk = 35
-        compileSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        minSdk = 26
+        targetSdk = 37
+        versionCode = 2
+        versionName = "0.1.1"
     }
 }
 ```
 
-最低系统版本为 Android 11 / API 30。首版面向近几年仍适合安装第三方 App 的 Android 墨水屏设备。
+最低系统版本为 Android 8.0 / API 26。首版面向仍适合安装第三方 App 的 Android 墨水屏设备。
+首版应避免依赖厂商 ROM 可能裁剪的 `java.time` 新接口，并尽量减少后台组件与无关依赖。
 
 ## 2. 产品定位
 
@@ -271,16 +271,16 @@ KOReader 协作说明
 
 ```text
 语言：Kotlin
-UI：Jetpack Compose 或传统 View
-数据库：Room / SQLite
-后台任务：WorkManager
+UI：传统 View（LinearLayout / TextView / Button 等）
+数据库：SQLite（SQLiteOpenHelper）
+后台任务：应用启动时按需执行（不依赖 WorkManager）
 网络：OkHttp
-RSS / Atom 解析：XmlPullParser 或轻量解析器
+RSS / Atom 解析：Jsoup XML Parser（不依赖 Android XmlPullParser）
 HTML 解析：Jsoup
 正文提取：Readability 类算法
 图片处理：Android Bitmap
-文件访问：Storage Access Framework
-阅读包格式：EPUB
+文件访问：Storage Access Framework / 应用私有目录
+阅读包格式：EPUB（ZIP 格式直接构建，无第三方 EPUB 库）
 调试输出：HTML
 ```
 
@@ -642,21 +642,24 @@ shimmer 加载动画
 依赖颜色区分状态
 ```
 
-### 13.4 Compose 注意事项
+### 13.4 首版实现说明
 
-如使用 Jetpack Compose：
+首版采用传统 View 体系（LinearLayout / TextView / Button 等），未使用 Jetpack Compose。
+
+```kotlin
+// 主题使用 AppCompat Light NoActionBar + 自定义属性
+// 界面全部以代码构建，无 XML 布局依赖（避免 Android 布局解析开销）
+```
+
+主题偏黑白灰，动画完全禁用（`android:windowAnimationStyle` 设为 `@null`）。页面状态变化以文本和布局更新为主。
+
+若后续引入 Compose，可参考以下初始设置（当前未使用）：
 
 ```kotlin
 val LocalEInkMode = staticCompositionLocalOf { true }
-```
 
-主题应偏黑白灰：
-
-```kotlin
 @Composable
-fun InkFeedTheme(
-    content: @Composable () -> Unit
-) {
+fun InkFeedTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
             background = Color.White,
@@ -670,8 +673,6 @@ fun InkFeedTheme(
     )
 }
 ```
-
-动画相关 API 默认少用。页面状态变化以文本和布局更新为主。
 
 ## 14. 文件访问
 

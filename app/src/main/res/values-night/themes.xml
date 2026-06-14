@@ -1,17 +1,14 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.InkFeed" parent="Theme.Material3.Light.NoActionBar">
+<resources>
+    <!-- E Ink — night theme is identical to day theme (E Ink screens don't use dark mode) -->
+    <style name="Theme.InkFeed" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowFullscreen">false</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:windowLayoutInDisplayCutoutMode">never</item>
-        <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">@color/black</item>
         <item name="android:navigationBarColor">@color/white</item>
         <item name="android:statusBarColor">@color/white</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="colorPrimary">@color/black</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <item name="colorSurface">@color/white</item>
         <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorBackground">@color/white</item>
+        <item name="android:textColor">@color/black</item>
     </style>
 </resources>
