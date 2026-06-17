@@ -2,6 +2,7 @@ package dev.rinstel.inkfeed.update
 
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -38,19 +39,7 @@ class UpdateChecker(
         )
         if (!isNewer(remoteVersion, normalizeVersion(currentVersion))) return null
         val pageUrl = release.optString("html_url")
-        val assets = release.optJSONArray("assets")
-        var downloadUrl = pageUrl
-        if (assets != null) {
-            for (index in 0 until assets.length()) {
-                val asset = assets.optJSONObject(index) ?: continue
-                val name = asset.optString("name")
-                val url = asset.optString("browser_download_url")
-                if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
-                    downloadUrl = url
-                    break
-                }
-            }
-        }
+        val downloadUrl = selectDownloadUrl(release.optJSONArray("assets"), pageUrl)
         return UpdateInfo(
             version = remoteVersion,
             title = release.optString("name").ifBlank { "InkFeed $remoteVersion" },
@@ -64,6 +53,32 @@ class UpdateChecker(
     companion object {
         private const val LATEST_RELEASE_API =
             "https://api.github.com/repos/RinStel/InkFeed/releases/latest"
+
+        internal fun selectDownloadUrl(assets: JSONArray?, pageUrl: String): String {
+            return selectDownloadUrl(
+                apks = buildList {
+                    if (assets != null) {
+                        for (index in 0 until assets.length()) {
+                            val asset = assets.optJSONObject(index) ?: continue
+                            val name = asset.optString("name")
+                            val url = asset.optString("browser_download_url")
+                            if (name.endsWith(".apk", ignoreCase = true) && url.isNotBlank()) {
+                                add(name to url)
+                            }
+                        }
+                    }
+                },
+                pageUrl = pageUrl
+            )
+        }
+
+        internal fun selectDownloadUrl(apks: List<Pair<String, String>>, pageUrl: String): String {
+            val releaseApk = apks.firstOrNull { (name, _) ->
+                val normalized = name.lowercase()
+                "debug" !in normalized && ("release" in normalized || "signed" in normalized)
+            }
+            return releaseApk?.second ?: apks.firstOrNull()?.second ?: pageUrl
+        }
 
         internal fun normalizeVersion(value: String): String =
             value.trim()
