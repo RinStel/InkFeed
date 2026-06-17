@@ -572,6 +572,7 @@ class MainActivity : ComponentActivity() {
                     }
                 },
                 onFailure = { error ->
+                    if (!manual) settings.lastUpdateCheckAt = System.currentTimeMillis()
                     runOnUiThread {
                         if (!isDestroyed && manual) {
                             status.text = "检查更新失败：${error.message ?: "未知错误"}"
