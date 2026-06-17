@@ -52,4 +52,8 @@ class AppSettings(context: Context) {
     var lastCacheCleanupAt: Long
         get() = preferences.getLong("last_cache_cleanup_at", 0L)
         set(value) = preferences.edit().putLong("last_cache_cleanup_at", value).apply()
+
+    var lastUpdateCheckAt: Long
+        get() = preferences.getLong("last_update_check_at", 0L)
+        set(value) = preferences.edit().putLong("last_update_check_at", value).apply()
 }

@@ -46,4 +46,5 @@ Also verify:
 - Use `v0.1.1` as the first public tag if you are shipping the current compatibility fixes.
 - Publish the signed `app-release.apk` directly on GitHub Releases.
 - In release notes, explicitly state `Android 8.0+`, `HTTP/HTTPS feeds supported`, and `optimized for E Ink devices`.
+- Attach the APK as a release asset; InkFeed's in-app update prompt opens the first `.apk` asset from the latest GitHub Release.
 - Mention that the app is tested on both a mainstream Android phone and a vendor E Ink reader before marking it as non-pre-release.

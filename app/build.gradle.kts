@@ -92,6 +92,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.jsoup)
     testImplementation(libs.junit)
+    testImplementation(libs.kxml2)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
 }

@@ -38,7 +38,10 @@ import dev.rinstel.inkfeed.core.util.BeijingTime
 import dev.rinstel.inkfeed.epub.builder.EpubBuilder
 import dev.rinstel.inkfeed.feed.opml.OpmlImporter
 import dev.rinstel.inkfeed.feed.sync.FeedSyncService
+import dev.rinstel.inkfeed.update.UpdateChecker
+import dev.rinstel.inkfeed.update.UpdateInfo
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class MainActivity : ComponentActivity() {
     private lateinit var database: InkFeedDatabase
@@ -46,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var syncService: FeedSyncService
     private lateinit var epubBuilder: EpubBuilder
     private lateinit var cacheCleaner: CacheCleaner
+    private lateinit var updateChecker: UpdateChecker
     private lateinit var content: FrameLayout
     private lateinit var status: TextView
     private lateinit var pageIndicator: TextView
@@ -99,11 +103,13 @@ class MainActivity : ComponentActivity() {
             syncService = FeedSyncService(this, database, settings)
             epubBuilder = EpubBuilder(this, settings, database)
             cacheCleaner = CacheCleaner(database)
+            updateChecker = UpdateChecker()
             stage = "layout"
             setContentView(buildRoot())
             stage = "today"
             showToday()
             scheduleCacheCleanupIfNeeded()
+            checkForUpdatesIfNeeded()
         } catch (error: Throwable) {
             val path = CrashReporter.write(this, stage, error)
             showStartupError(stage, path, error)
@@ -341,6 +347,11 @@ class MainActivity : ComponentActivity() {
                 status.text = "已清理 ${it.articleCount} 篇文章和 ${it.assetCount} 个图片文件"
             }
         })
+        root.addView(sectionTitle("应用更新"))
+        root.addView(bodyText("当前版本：${currentVersionName()}"))
+        root.addView(outlineButton("检查更新") {
+            checkForUpdates(manual = true)
+        })
         root.addView(sectionTitle("KOReader 协作"))
         root.addView(bodyText(
             "InkFeed 将 EPUB 写入所选目录的 daily/ 和 starred/ 子目录。" +
@@ -535,6 +546,76 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(intent) }
             .onFailure { status.text = "当前设备无法直接打开目录，请使用系统文件管理器" }
     }
+
+    private fun checkForUpdatesIfNeeded() {
+        val now = System.currentTimeMillis()
+        if (now - settings.lastUpdateCheckAt < TimeUnit.DAYS.toMillis(1)) return
+        checkForUpdates(manual = false)
+    }
+
+    private fun checkForUpdates(manual: Boolean) {
+        if (manual) status.text = "正在检查更新…"
+        executor.execute {
+            runCatching {
+                updateChecker.check(currentVersionName())
+            }.fold(
+                onSuccess = { update ->
+                    settings.lastUpdateCheckAt = System.currentTimeMillis()
+                    runOnUiThread {
+                        if (isDestroyed) return@runOnUiThread
+                        if (update == null) {
+                            if (manual) status.text = "当前已是最新版本"
+                        } else {
+                            status.text = "发现新版本 ${update.version}"
+                            showUpdateDialog(update)
+                        }
+                    }
+                },
+                onFailure = { error ->
+                    runOnUiThread {
+                        if (!isDestroyed && manual) {
+                            status.text = "检查更新失败：${error.message ?: "未知错误"}"
+                        }
+                    }
+                }
+            )
+        }
+    }
+
+    private fun showUpdateDialog(update: UpdateInfo) {
+        val notes = update.notes
+            ?.lineSequence()
+            ?.filter { it.isNotBlank() }
+            ?.take(6)
+            ?.joinToString("\n")
+            .orEmpty()
+        val message = buildString {
+            appendLine("当前版本：${currentVersionName()}")
+            appendLine("最新版本：${update.version}")
+            update.publishedAt?.let { appendLine("发布时间：$it") }
+            if (notes.isNotBlank()) {
+                appendLine()
+                append(notes)
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle("发现新版本")
+            .setMessage(message)
+            .setPositiveButton("打开下载页") { _, _ -> openBrowser(update.downloadUrl.ifBlank { update.pageUrl }) }
+            .setNegativeButton("稍后", null)
+            .show()
+    }
+
+    private fun openBrowser(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        runCatching { startActivity(intent) }
+            .onFailure { status.text = "当前设备无法打开浏览器：$url" }
+    }
+
+    private fun currentVersionName(): String =
+        runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "0.0.0"
+        }.getOrDefault("0.0.0")
 
     private fun <T> runTask(message: String, task: () -> T, success: (T) -> Unit) {
         status.text = message
