@@ -37,6 +37,10 @@ class AppSettings(context: Context) {
         get() = preferences.getBoolean("split_epub_by_source", false)
         set(value) = preferences.edit().putBoolean("split_epub_by_source", value).apply()
 
+    var todayUnreadOnly: Boolean
+        get() = preferences.getBoolean("today_unread_only", false)
+        set(value) = preferences.edit().putBoolean("today_unread_only", value).apply()
+
     var lastDailyPath: String?
         get() = preferences.getString("last_daily_path", null)
         set(value) = preferences.edit().putString("last_daily_path", value).apply()

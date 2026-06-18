@@ -3,6 +3,7 @@ package dev.rinstel.inkfeed
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
+import android.content.res.ColorStateList
 import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
@@ -35,9 +36,11 @@ import dev.rinstel.inkfeed.core.model.ImagePolicy
 import dev.rinstel.inkfeed.core.model.Source
 import dev.rinstel.inkfeed.core.util.AppSettings
 import dev.rinstel.inkfeed.core.util.BeijingTime
+import dev.rinstel.inkfeed.epub.builder.BuildResult
 import dev.rinstel.inkfeed.epub.builder.EpubBuilder
 import dev.rinstel.inkfeed.feed.opml.OpmlImporter
 import dev.rinstel.inkfeed.feed.sync.FeedSyncService
+import dev.rinstel.inkfeed.feed.sync.SyncResult
 import dev.rinstel.inkfeed.update.UpdateChecker
 import dev.rinstel.inkfeed.update.UpdateInfo
 import java.util.concurrent.Executors
@@ -229,6 +232,8 @@ class MainActivity : ComponentActivity() {
     private fun showToday() {
         page = Page.TODAY
         val articles = todayArticles()
+        val visibleArticles = articlesForTodayFilter(articles)
+        val unreadCount = articles.count { !it.isRead }
         Log.d(TAG, "showToday: articles=${articles.size} synced=${articles.map { it.syncedAt ?: 0L }}")
         val sources = database.sources()
         val root = pageLayout()
@@ -236,27 +241,30 @@ class MainActivity : ComponentActivity() {
         val lastSync = sources.mapNotNull { it.lastSyncAt }.maxOrNull()
         root.addView(bodyText(
             "今日文章：${articles.size} 篇\n" +
-                "未读文章：${articles.count { !it.isRead }} 篇\n" +
-                "预计阅读：${articles.sumOf { it.readingMinutes }} 分钟\n" +
+                "未读文章：$unreadCount 篇\n" +
+                "当前列表：${visibleArticles.size} 篇 · ${visibleArticles.sumOf { it.readingMinutes }} 分钟\n" +
                 "最近同步：${formatTime(lastSync)}\n" +
                 "阅读包：${dailyPackageStatus()}\n" +
                 "输出目录：${outputPath()}"
         ))
+        root.addView(outlineButton(
+            if (settings.todayUnreadOnly) "同步并生成未读 EPUB" else "同步并生成今日 EPUB"
+        ) { syncAndBuildDaily() }, fullWidthButtonParams(8))
         root.addView(buttonRow(
-            outlineButton("同步全部") { syncAll() },
-            outlineButton(if (settings.lastDailyPath == null) "生成 EPUB" else "重新生成") {
-                buildDaily()
-            }
-        ))
-        root.addView(buttonRow(
-            outlineButton("打开输出目录") { openOutputDirectory() },
-            outlineButton("选择目录") { outputDirectoryLauncher.launch(settings.outputTreeUri) }
+            outlineButton(if (settings.todayUnreadOnly) "显示全部" else "只看未读") {
+                settings.todayUnreadOnly = !settings.todayUnreadOnly
+                showToday()
+            },
+            outlineButton("全部已读") { markTodayRead(visibleArticles) },
+            outlineButton("打开目录") { openOutputDirectory() }
         ))
         root.addView(sectionTitle("文章"))
         if (articles.isEmpty()) {
             root.addView(emptyText("尚无文章。请先在“订阅源”添加 RSS / Atom 并同步。"))
+        } else if (visibleArticles.isEmpty()) {
+            root.addView(emptyText("当前筛选下没有文章。"))
         } else {
-            articles.forEach { root.addView(articleView(it, allowUnstar = false)) }
+            visibleArticles.forEach { root.addView(articleView(it, allowUnstar = false)) }
         }
         show(root)
     }
@@ -326,6 +334,9 @@ class MainActivity : ComponentActivity() {
         val limit = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             setText(settings.dailyLimit.toString())
+            setTextColor(Color.BLACK)
+            setHintTextColor(Color.DKGRAY)
+            background = inputBackground()
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
         root.addView(limit)
@@ -366,10 +377,18 @@ class MainActivity : ComponentActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), 0, dp(20), 0)
         }
-        val title = EditText(this).apply { hint = "名称（可留空）" }
+        val title = EditText(this).apply {
+            hint = "名称（可留空）"
+            setTextColor(Color.BLACK)
+            setHintTextColor(Color.DKGRAY)
+            background = inputBackground()
+        }
         val url = EditText(this).apply {
             hint = "https://example.com/feed.xml"
             inputType = InputType.TYPE_TEXT_VARIATION_URI
+            setTextColor(Color.BLACK)
+            setHintTextColor(Color.DKGRAY)
+            background = inputBackground()
         }
         form.addView(title)
         form.addView(url)
@@ -511,32 +530,38 @@ class MainActivity : ComponentActivity() {
         return box
     }
 
-    private fun syncAll() {
-        runTask("正在同步全部订阅源…", { syncService.syncAll() }) { result ->
-            status.text = if (result.errors.isEmpty()) {
-                "同步完成：新增 ${result.newArticleCount}，重复 ${result.duplicateCount}，" +
-                    "失败 ${result.failedArticleCount}"
+    private fun syncAndBuildDaily() {
+        runTask("正在同步并生成今日 EPUB…", {
+            val syncResult = syncService.syncAll()
+            val articles = articlesForTodayFilter(todayArticles())
+            if (articles.isEmpty()) {
+                SyncAndBuildResult(syncResult, null)
             } else {
-                "同步完成：新增 ${result.newArticleCount}，文章失败 ${result.failedArticleCount}，" +
-                    "订阅源错误 ${result.errors.size}"
+                val buildResult = epubBuilder.buildDaily(articles)
+                database.markPackaged(articles.map(Article::id))
+                settings.lastDailyPath = buildResult.displayPath
+                settings.lastDailyGeneratedAt = System.currentTimeMillis()
+                SyncAndBuildResult(syncResult, buildResult)
+            }
+        }) { result ->
+            status.text = if (result.build == null) {
+                "同步完成：新增 ${result.sync.newArticleCount}，当前筛选无可生成文章"
+            } else {
+                "已同步并生成 ${result.build.displayPath}（${result.build.articleCount} 篇）"
             }
             showToday()
         }
     }
 
-    private fun buildDaily() {
-        val articles = todayArticles()
-        if (articles.isEmpty()) {
-            status.text = "没有可生成的文章"
+    private fun markTodayRead(articles: List<Article>) {
+        val unread = articles.filterNot { it.isRead }
+        if (unread.isEmpty()) {
+            status.text = "当前列表没有未读文章"
             return
         }
-        runTask("正在生成每日 EPUB…", { epubBuilder.buildDaily(articles) }) {
-            database.markPackaged(articles.map(Article::id))
-            settings.lastDailyPath = it.displayPath
-            settings.lastDailyGeneratedAt = System.currentTimeMillis()
-            status.text = "已生成 ${it.displayPath}（${it.articleCount} 篇，${it.packageCount} 个文件）"
-            showToday()
-        }
+        unread.forEach { database.setRead(it.id, true) }
+        status.text = "已标记 ${unread.size} 篇为已读"
+        showToday()
     }
 
     private fun openOutputDirectory() {
@@ -877,11 +902,28 @@ class MainActivity : ComponentActivity() {
 
     private fun choiceSpinner(items: List<String>, selected: String, change: (String) -> Unit) =
         Spinner(this).apply {
-            adapter = ArrayAdapter(
+            backgroundTintList = grayscaleControlTint()
+            adapter = object : ArrayAdapter<String>(
                 this@MainActivity,
                 android.R.layout.simple_spinner_dropdown_item,
                 items
-            )
+            ) {
+                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
+                    super.getView(position, convertView, parent).apply {
+                        if (this is TextView) {
+                            setTextColor(Color.BLACK)
+                            setBackgroundColor(Color.WHITE)
+                        }
+                    }
+
+                override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
+                    super.getDropDownView(position, convertView, parent).apply {
+                        if (this is TextView) {
+                            setTextColor(Color.BLACK)
+                            setBackgroundColor(Color.WHITE)
+                        }
+                    }
+            }
             setSelection(items.indexOf(selected).coerceAtLeast(0))
             onItemSelectedListener = SimpleItemSelectedListener { change(items[it]) }
         }
@@ -889,9 +931,28 @@ class MainActivity : ComponentActivity() {
     private fun settingCheck(label: String, checked: Boolean, change: (Boolean) -> Unit) =
         CheckBox(this).apply {
             text = label
+            setTextColor(Color.BLACK)
+            buttonTintList = grayscaleControlTint()
             isChecked = checked
             minHeight = dp(48)
             setOnCheckedChangeListener { _, value -> change(value) }
+        }
+
+    private fun grayscaleControlTint() = ColorStateList(
+        arrayOf(
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(android.R.attr.state_activated),
+            intArrayOf()
+        ),
+        intArrayOf(Color.BLACK, Color.BLACK, Color.DKGRAY)
+    )
+
+    private fun inputBackground() =
+        android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            cornerRadius = dp(4).toFloat()
+            setColor(Color.WHITE)
+            setStroke(dp(1), Color.BLACK)
         }
 
     private fun divider() = android.graphics.drawable.ColorDrawable(Color.BLACK).apply {
@@ -925,7 +986,15 @@ class MainActivity : ComponentActivity() {
         return articles
     }
 
+    private fun articlesForTodayFilter(articles: List<Article>): List<Article> =
+        if (settings.todayUnreadOnly) articles.filterNot { it.isRead } else articles
+
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
+    private data class SyncAndBuildResult(
+        val sync: SyncResult,
+        val build: BuildResult?
+    )
 
     private enum class Page { TODAY, SOURCES, STARRED, SETTINGS }
 
