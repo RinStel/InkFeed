@@ -236,6 +236,7 @@ class MainActivity : ComponentActivity() {
         val lastSync = sources.mapNotNull { it.lastSyncAt }.maxOrNull()
         root.addView(bodyText(
             "今日文章：${articles.size} 篇\n" +
+                "未读文章：${articles.count { !it.isRead }} 篇\n" +
                 "预计阅读：${articles.sumOf { it.readingMinutes }} 分钟\n" +
                 "最近同步：${formatTime(lastSync)}\n" +
                 "阅读包：${dailyPackageStatus()}\n" +
@@ -492,15 +493,21 @@ class MainActivity : ComponentActivity() {
             box.addView(bodyText(it.take(180)))
         }
         box.addView(bodyText(
-            "${formatTime(article.publishedAt)} · 预计阅读 ${article.readingMinutes} 分钟"
+            "${formatTime(article.publishedAt)} · 预计阅读 ${article.readingMinutes} 分钟 · " +
+                if (article.isRead) "已读" else "未读"
         ))
-        box.addView(outlineButton(
-            if (allowUnstar || article.isStarred) "取消收藏" else "收藏"
-        ) {
-            database.setStarred(article.id, !article.isStarred)
-            status.text = if (article.isStarred) "已取消收藏" else "已收藏"
-            refreshPage()
-        })
+        box.addView(buttonRow(
+            outlineButton(if (article.isRead) "标为未读" else "标为已读") {
+                database.setRead(article.id, !article.isRead)
+                status.text = if (article.isRead) "已标为未读" else "已标为已读"
+                refreshPage()
+            },
+            outlineButton(if (allowUnstar || article.isStarred) "取消收藏" else "收藏") {
+                database.setStarred(article.id, !article.isStarred)
+                status.text = if (article.isStarred) "已取消收藏" else "已收藏"
+                refreshPage()
+            }
+        ))
         return box
     }
 

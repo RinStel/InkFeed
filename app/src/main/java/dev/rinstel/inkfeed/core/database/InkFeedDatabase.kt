@@ -321,6 +321,15 @@ class InkFeedDatabase(context: Context) :
         )
     }
 
+    fun setRead(articleId: Long, read: Boolean) {
+        writableDatabase.update(
+            "articles",
+            ContentValues().apply { put("is_read", if (read) 1 else 0) },
+            "id = ?",
+            arrayOf(articleId.toString())
+        )
+    }
+
     fun updateArticleContent(articleId: Long, contentText: String, contentHtml: String) {
         writableDatabase.update(
             "articles",
