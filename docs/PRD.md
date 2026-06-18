@@ -16,19 +16,16 @@ GitHub 仓库名：inkfeed
 
 Android 基础配置：
 
-```kotlin
-android {
-    namespace = "dev.rinstel.inkfeed"
-    compileSdk = 37
+当前 Android 版本号以 `gradle/libs.versions.toml` 中的 `appVersionName` 与
+`appVersionCode` 为准，避免构建配置和文档分叉。
 
-    defaultConfig {
-        applicationId = "dev.rinstel.inkfeed"
-        minSdk = 26
-        targetSdk = 37
-        versionCode = 2
-        versionName = "0.1.1"
-    }
-}
+基础构建约束：
+
+```text
+namespace/applicationId: dev.rinstel.inkfeed
+compileSdk: 37
+minSdk: 26
+targetSdk: 37
 ```
 
 最低系统版本为 Android 8.0 / API 26。首版面向仍适合安装第三方 App 的 Android 墨水屏设备。

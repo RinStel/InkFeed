@@ -25,6 +25,11 @@ The build also accepts:
 
 ## Verification
 
+Before building a release, bump these values in `gradle/libs.versions.toml`:
+
+- `appVersionName`
+- `appVersionCode`
+
 ```powershell
 .\gradlew.bat :app:testDebugUnitTest
 .\gradlew.bat :app:connectedDebugAndroidTest
@@ -43,7 +48,7 @@ Also verify:
 
 ## Release Recommendations
 
-- Use `v0.1.1` as the first public tag if you are shipping the current compatibility fixes.
+- Use `v0.1.2` as the first public tag if you are shipping the current compatibility and workflow fixes.
 - Publish the signed `app-release.apk` directly on GitHub Releases.
 - In release notes, explicitly state `Android 8.0+`, `HTTP/HTTPS feeds supported`, and `optimized for E Ink devices`.
 - Attach the APK as a release asset; InkFeed's in-app update prompt opens the first `.apk` asset from the latest GitHub Release.
